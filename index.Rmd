@@ -1,0 +1,153 @@
+---
+title: "Weight Lifting Quality Prediction"
+author: "Saul Cruz"
+date: "4/9/2017"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+
+The goal of this project is to predict the manner of how different users did the exercise. 
+
+In summary, our model will predict the following possible outcomes:
+
+
+* Class A: Correct exercise
+
+* Class B: Incorrect, throwing the elbows to the front 
+
+* Class C: Incorrect, lifting the dumbbell only halfway 
+
+* Class D: Incorrect, lowering the dumbbell only halfway
+
+* Class E: Incorrect, throwing the hips to the front 
+
+The model will use multiple features/attributes that are feed from different sensors:
+
+* Arm sensors orientation
+
+* Belt sensors orientation
+
+* Forearm sensors orientation
+
+* Dumbbell sensors orientation
+
+## Loading the dataset
+
+The WLE Data Set is divided into training and test.
+
+The training dataset contains originally 19622 observations of 160 variables
+The testing dataset contains 20 observations of 160 variables
+
+```{r dataset, message=FALSE, warning=FALSE}
+library(caret);library(kernlab);library(RCurl);library(ggplot2);library(corrplot);library(randomForest)
+
+training_source<-getURL('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv',ssl.verifyhost=FALSE,ssl.verifypeer=FALSE)
+training <- read.csv(textConnection(training_source), header=T, na.strings = c('#DIV/0', '', 'NA') ,stringsAsFactors = F)
+
+testing_source<-getURL('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv',ssl.verifyhost=FALSE,ssl.verifypeer=FALSE)
+testing <- read.csv(textConnection(testing_source),na.strings = c('#DIV/0', '', 'NA') , stringsAsFactors=F,header=T)
+
+
+```
+
+## Feature Selection
+
+To reduce the highly dimensional dataset, the following steps will be followed:
+
+### 1.-Remove elements with a High Missing Value Ratio (>70%)
+
+In other words, we will remove columns/attributes with more than 70% of its data missing
+```{r featureselection_1}
+        testing_clean<-testing[,-which(colMeans(is.na(training)) > 0.7)]
+        training_clean<-training[, -which(colMeans(is.na(training)) > 0.7)]
+```
+
+After the first step, 62.5% of the features were removed. In other words, there are now only 60 variables.
+
+### 2.- Remove Unnecessary columns like timestamps, new_window,num_window,user_name
+```{r featureselection_2, message=FALSE}
+        drops <- c("X","user_name","raw_timestamp_part_1","raw_timestamp_part_2","cvtd_timestamp","new_window","num_window","problem_id")
+        training_clean<-training_clean[ , !(names(training_clean) %in% drops)] #53 variables remaining 
+        testing_clean<-testing_clean[,!(names(testing_clean) %in% drops)] #52 variables remaining
+```
+After the second step, there are now 53 variables
+
+### 3.- Apply the High Correlation Filter (Pearson's)
+To remove highly correlated data columns, first we need to measure the correlation between pairs of columns using the Linear Correlation node
+
+```{r featureselection_3, message=FALSE,echo=FALSE}
+        correlationMatrix <- cor(training_clean[,1:52])
+        corrplot(correlationMatrix,order="hclust")
+```
+Then we have to apply the Correlation Filter node to remove one of two highly correlated data columns, if any. If two variables have a high correlation, the function looks at the mean absolute correlation of each variable and removes the variable with the largest mean absolute correlation.
+
+```{r featureselection_4, message=FALSE}
+        highlyCorrelated<-findCorrelation(correlationMatrix, cutoff=0.75)
+        training_clean<-training_clean[,-highlyCorrelated] #32 variables remaining, including the output
+        testing_clean<-testing_clean[,-highlyCorrelated]  #31 variables remaining
+        #cleaned
+        correlationMatrixClean <- cor(training_clean[,1:31])
+        corrplot(correlationMatrixClean,order="hclust")
+```
+Once the feature selection is completed, the original dataset has been reduced to only 32 variables, this will help to minimize the risk of overfitting the model.
+
+##Training and Validation datasets
+We'll use 70% of the training dataset to train our models,  and 30% of the training dataset to validate the accuracy of each one of our models during the model selection phase.
+
+```{r splitting, message=FALSE}
+        inBuild <- createDataPartition(y=training_clean$classe,
+                                       p=0.7, list=FALSE)
+        validation <- training_clean[-inBuild,]
+        training_final <- training_clean[inBuild,]
+```
+
+##Model Selection
+In this section, we'll use two different algorithms to train our model: Gradient Boosted Machines  and Random Forests
+
+###Gradient Boosted Machines (GBM)
+
+```{r ms_1, message=FALSE}
+        set.seed(3333)
+        mod_gbm <- train(classe ~ ., method="gbm",data=training_final,verbose=FALSE) 
+        mod_gbm_predict<-predict(mod_gbm,validation)
+        cm<-confusionMatrix(mod_gbm_predict, validation$classe) 
+        mod_gbm_accuracy <- cm$overall['Accuracy']
+        cm
+```
+
+Note that there is an Accuracy of: `mod_gbm_accuracy` 
+
+###Random Forests
+```{r ms_2, message=FALSE}
+        set.seed(3333)
+        mod_rf <- train(classe ~.,method="rf",            #Random Forest in the training data
+                        data=training_final)
+        mod_rf_predict<-predict(mod_rf,validation)
+        cm_rf<-confusionMatrix(mod_rf_predict, validation$classe)
+        mod_rf_accuracy <- cm_rf$overall['Accuracy']
+```
+
+Note that there is an Accuracy of: `r mod_rf_accuracy` which is better than the first model (GBM)
+
+##Predicting testing dataset
+```{r prediction, message=FALSE}
+   
+        mod_rf_prediction<-predict(mod_rf,testing_clean)
+        mod_rf_prediction
+```
+The above are the predictions for each one of the 20 problems.
+
+#Conclusion
+The Random Forest algorithm worked better than the GBM. After determining the accuracy of this algorithm we can conclude that our predictions are `r mod_rf_accuracy` accurate
+
+## References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4do2ngHXp
